@@ -1,0 +1,47 @@
+--- nginx-1.18.0.orig/auto/lib/libgd/conf
++++ nginx-1.18.0/auto/lib/libgd/conf
+@@ -8,7 +8,7 @@
+     ngx_feature_run=no
+     ngx_feature_incs="#include <gd.h>"
+     ngx_feature_path=
+-    ngx_feature_libs="-lgd"
++    ngx_feature_libs="-lgd -lpng -lz -lfreetype -ljpeg -lwebp -lbz2 -lbrotlidec-static -lbrotlicommon-static"
+     ngx_feature_test="gdImagePtr img = gdImageCreateFromGifPtr(1, NULL);
+                       (void) img"
+     . auto/feature
+@@ -22,9 +22,9 @@
+     ngx_feature_path="/usr/local/include"
+ 
+     if [ $NGX_RPATH = YES ]; then
+-        ngx_feature_libs="-R/usr/local/lib -L/usr/local/lib -lgd"
++        ngx_feature_libs="-R/usr/local/lib -L/usr/local/lib -lgd -lpng -lz -lfreetype -ljpeg -lwebp -lbz2 -lbrotlidec-static -lbrotlicommon-static"
+     else
+-        ngx_feature_libs="-L/usr/local/lib -lgd"
++        ngx_feature_libs="-L/usr/local/lib -lgd -lpng -lz -lfreetype -ljpeg -lwebp -lbz2 -lbrotlidec-static -lbrotlicommon-static"
+     fi
+ 
+     . auto/feature
+@@ -39,9 +39,9 @@
+     ngx_feature_path="/usr/pkg/include"
+ 
+     if [ $NGX_RPATH = YES ]; then
+-        ngx_feature_libs="-R/usr/pkg/lib -L/usr/pkg/lib -lgd"
++        ngx_feature_libs="-R/usr/pkg/lib -L/usr/pkg/lib -lgd -lpng -lz -lfreetype -ljpeg -lwebp -lbz2 -lbrotlidec-static -lbrotlicommon-static"
+     else
+-        ngx_feature_libs="-L/usr/pkg/lib -lgd"
++        ngx_feature_libs="-L/usr/pkg/lib -lgd -lpng -lz -lfreetype -ljpeg -lwebp -lbz2 -lbrotlidec-static -lbrotlicommon-static"
+     fi
+ 
+     . auto/feature
+@@ -56,9 +56,9 @@
+     ngx_feature_path="/opt/local/include"
+ 
+     if [ $NGX_RPATH = YES ]; then
+-        ngx_feature_libs="-R/opt/local/lib -L/opt/local/lib -lgd"
++        ngx_feature_libs="-R/opt/local/lib -L/opt/local/lib -lgd -lpng -lz -lfreetype -ljpeg -lwebp -lbz2 -lbrotlidec-static -lbrotlicommon-static"
+     else
+-        ngx_feature_libs="-L/opt/local/lib -lgd"
++        ngx_feature_libs="-L/opt/local/lib -lgd -lpng -lz -lfreetype -ljpeg -lwebp -lbz2 -lbrotlidec-static -lbrotlicommon-static"
+     fi
+ 
+     . auto/feature
