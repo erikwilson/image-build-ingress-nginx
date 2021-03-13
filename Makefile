@@ -8,8 +8,7 @@ BUILD_META=-build$(shell date +%Y%m%d)
 ORG ?= rancher
 PKG ?= k8s.io/ingress-nginx
 SRC ?= github.com/kubernetes/ingress-nginx
-TAG ?= controller-v0.35.0$(BUILD_META)
-NGINX_VERSION ?= 1.18.0
+TAG ?= v0.35.0$(BUILD_META)
 
 ifneq ($(DRONE_TAG),)
 TAG := $(DRONE_TAG)
@@ -21,7 +20,7 @@ endif
 
 .PHONY: image-build
 image-build: patches
-	docker build \
+	docker build --target nginx-builder \
 		--pull \
 		--build-arg ARCH=$(ARCH) \
 		--build-arg PKG=$(PKG) \
@@ -29,7 +28,6 @@ image-build: patches
 		--build-arg TAG=$(TAG:$(BUILD_META)=) \
 		--build-arg MAJOR=$(shell ./scripts/semver-parse.sh ${TAG} major) \
 		--build-arg MINOR=$(shell ./scripts/semver-parse.sh ${TAG} minor) \
-		--build-arg NGINX_VERSION=${NGINX_VERSION} \
 		--tag $(ORG)/hardened-ingress-nginx:$(TAG) \
 		--tag $(ORG)/hardened-ingress-nginx:$(TAG)-$(ARCH) \
 	.

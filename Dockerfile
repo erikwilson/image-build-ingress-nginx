@@ -1,170 +1,33 @@
 ARG UBI_IMAGE=registry.access.redhat.com/ubi7/ubi-minimal:latest
 ARG GO_IMAGE=rancher/hardened-build-base:v1.15.8b5
 
-FROM ${UBI_IMAGE} as ubi
-
-#--- build hardened nginx with boringssl ---
-#--- adapted from https://github.com/nginx-modules/docker-nginx-boringssl ---
-FROM ${GO_IMAGE} as nginx-builder
-
-RUN apk add \
-        build-base \
-        brotli-static \
-        bzip2-static \
-        cmake \
-        freetype-static \
-        gd-dev \
-        geoip-dev \
-        gnupg \
-        libjpeg-turbo-static \
-        libpng-static \
-        libwebp-static \
-        libxslt-dev \
-        linux-headers \
-        pcre-dev \
-        zlib-dev \
-        zlib-static
-
-WORKDIR /usr/src
-
-RUN git clone --depth=1 --recurse-submodules https://github.com/google/ngx_brotli
-RUN git clone --depth=1 https://github.com/openresty/headers-more-nginx-module ngx_headers_more
-RUN git clone --depth=1 https://boringssl.googlesource.com/boringssl
-
-RUN sed -i 's@out \([>=]\) TLS1_2_VERSION@out \1 TLS1_3_VERSION@' ./boringssl/ssl/ssl_lib.cc
-RUN sed -i 's@ssl->version[ ]*=[ ]*TLS1_2_VERSION@ssl->version = TLS1_3_VERSION@' ./boringssl/ssl/s3_lib.cc
-RUN sed -i 's@(SSL3_VERSION, TLS1_2_VERSION@(SSL3_VERSION, TLS1_3_VERSION@' ./boringssl/ssl/ssl_test.cc
-RUN sed -i 's@\$shaext[ ]*=[ ]*0;@\$shaext = 1;@' ./boringssl/crypto/*/asm/*.pl
-RUN sed -i 's@\$avx[ ]*=[ ]*[0|1];@\$avx = 2;@' ./boringssl/crypto/*/asm/*.pl
-RUN sed -i 's@\$addx[ ]*=[ ]*0;@\$addx = 1;@' ./boringssl/crypto/*/asm/*.pl
-
-RUN mkdir -p ./boringssl/build ./boringssl/.openssl/lib ./boringssl/.openssl/include \
-    && ln -sf /usr/src/boringssl/include/openssl ./boringssl/.openssl/include/openssl \
-    && touch ./boringssl/.openssl/include/openssl/ssl.h
-
-RUN cmake -B./boringssl/build -H./boringssl -DCMAKE_BUILD_TYPE=RelWithDebInfo
-RUN make -C./boringssl/build -j$(getconf _NPROCESSORS_ONLN)
-RUN cp ./boringssl/build/crypto/libcrypto.a ./boringssl/build/ssl/libssl.a ./boringssl/.openssl/lib/
-
-ARG NGINX_VERSION=1.18.0
-RUN curl -fSL https://nginx.org/download/nginx-$NGINX_VERSION.tar.gz -o nginx.tar.gz
-RUN curl -fSL https://nginx.org/download/nginx-$NGINX_VERSION.tar.gz.asc -o nginx.tar.gz.asc
-
-ENV GPG_KEYS=B0F4253373F8F6F510D42178520A9993A1C052F8
-RUN export GNUPGHOME="$(mktemp -d)" \
-    && found=''; \
-    for server in \
-        ha.pool.sks-keyservers.net \
-        hkp://keyserver.ubuntu.com:80 \
-        hkp://p80.pool.sks-keyservers.net:80 \
-        pgp.mit.edu \
-    ; do \
-        echo "Fetching GPG key $GPG_KEYS from $server"; \
-        gpg --keyserver "$server" --keyserver-options timeout=10 --recv-keys "$GPG_KEYS" && found=yes && break; \
-    done; \
-    test -z "$found" && echo >&2 "error: failed to fetch GPG key $GPG_KEYS" && exit 1; \
-    gpg --batch --verify nginx.tar.gz.asc nginx.tar.gz
-
-RUN tar -xzf nginx.tar.gz
-WORKDIR /usr/src/nginx-$NGINX_VERSION
-COPY patches/ /usr/src/patches/
-RUN for p in $(ls /usr/src/patches/*); do patch -p1 < $p; done
-
-ARG NGINX_CONFIG="\
-        --prefix=/etc/nginx \
-        --sbin-path=/usr/sbin/nginx \
-        --modules-path=/usr/lib/nginx/modules \
-        --conf-path=/etc/nginx/nginx.conf \
-        --error-log-path=/var/log/nginx/error.log \
-        --http-log-path=/var/log/nginx/access.log \
-        --pid-path=/var/run/nginx.pid \
-        --lock-path=/var/run/nginx.lock \
-        --http-client-body-temp-path=/var/cache/nginx/client_temp \
-        --http-proxy-temp-path=/var/cache/nginx/proxy_temp \
-        --http-fastcgi-temp-path=/var/cache/nginx/fastcgi_temp \
-        --http-uwsgi-temp-path=/var/cache/nginx/uwsgi_temp \
-        --http-scgi-temp-path=/var/cache/nginx/scgi_temp \
-        --user=nginx \
-        --group=nginx \
-        --with-http_ssl_module \
-        --with-http_realip_module \
-        --with-http_addition_module \
-        --with-http_sub_module \
-        --with-http_dav_module \
-        --with-http_flv_module \
-        --with-http_mp4_module \
-        --with-http_gunzip_module \
-        --with-http_gzip_static_module \
-        --with-http_random_index_module \
-        --with-http_secure_link_module \
-        --with-http_stub_status_module \
-        --with-http_auth_request_module \
-        --with-http_xslt_module \
-        --with-http_image_filter_module \
-        --with-http_geoip_module \
-        --with-threads \
-        --with-stream \
-        --with-stream_ssl_module \
-        --with-stream_ssl_preread_module \
-        --with-stream_realip_module \
-        --with-stream_geoip_module \
-        --with-http_slice_module \
-        --with-mail \
-        --with-mail_ssl_module \
-        --with-compat \
-        --with-file-aio \
-        --with-http_v2_module \
-        --with-cc-opt='-no-pie -static -I/usr/src/boringssl/.openssl/include' \
-        --with-ld-opt='-no-pie -static -L/usr/src/boringssl/.openssl/lib' \
-        --add-module=/usr/src/ngx_headers_more \
-        --add-module=/usr/src/ngx_brotli \
-"
-
-RUN eval "./configure $NGINX_CONFIG --with-debug"
-RUN make -j$(getconf _NPROCESSORS_ONLN)
-RUN mv objs/nginx objs/nginx-debug
-
-RUN eval "./configure $NGINX_CONFIG"
-RUN make -j$(getconf _NPROCESSORS_ONLN)
-RUN make install
-
-RUN mkdir /etc/nginx/conf.d/ \
-    && mkdir -p /usr/share/nginx/html/ \
-    && install -m644 html/index.html /usr/share/nginx/html/ \
-    && install -m644 html/50x.html /usr/share/nginx/html/ \
-    && install -m755 objs/nginx-debug /usr/sbin/nginx-debug \
-    && strip /usr/sbin/nginx*
-
-COPY conf/nginx.conf /etc/nginx/nginx.conf
-# COPY conf/nginx.vh.no-default.conf /etc/nginx/conf.d/default.conf
-
-RUN addgroup -S --gid 1001 nginx
-RUN adduser -D -S -h /var/cache/nginx -s /sbin/nologin -G nginx --uid 1001 nginx
-
-# forward request and error logs to docker log collector
-RUN ln -sf /dev/stdout /var/log/nginx/access.log
-RUN ln -sf /dev/stderr /var/log/nginx/error.log
-
-
-#--- build hardened nginx with goboring ---
-FROM ${GO_IMAGE} as ingress-nginx-builder
-# setup the build
+ARG TAG=v0.35.0
 ARG ARCH="amd64"
-ARG TAG=controller-v0.35.0
 ARG PKG=k8s.io/ingress-nginx
 ARG SRC=github.com/kubernetes/ingress-nginx
 ARG MAJOR
 ARG MINOR
+
+FROM ${UBI_IMAGE} as ubi
+
+
+#--- build hardened ingress-nginx with goboring ---
+FROM ${GO_IMAGE} as ingress-nginx-builder
+# setup the build
+ARG TAG
+ARG PKG
+ARG SRC
+ENV BUILD_TAG=controller-${TAG}
 RUN git clone --depth=1 https://${SRC}.git $GOPATH/src/${PKG}
 WORKDIR $GOPATH/src/${PKG}
 RUN git fetch --all --tags --prune
-RUN git checkout tags/${TAG} -b ${TAG}
+RUN git checkout tags/${BUILD_TAG} -b ${BUILD_TAG}
 
 RUN \
     export COMMIT=$(git rev-parse --short HEAD) && \
     export REPO_INFO=$(git config --get remote.origin.url) && \
     export GO_LDFLAGS="-linkmode=external \
-        -X ${PKG}/version.RELEASE=${TAG} \
+        -X ${PKG}/version.RELEASE=${BUILD_TAG} \
         -X ${PKG}/version.COMMIT=${COMMIT} \
         -X ${PKG}/version.REPO=${REPO_INFO} \
     " && \
@@ -178,24 +41,140 @@ RUN go-assert-boring.sh bin/*
 RUN install -s bin/* /usr/local/bin
 
 
+#--- boringssl build adapted from https://github.com/nginx-modules/docker-nginx-boringssl ---
+FROM ${GO_IMAGE} as boringssl-builder
+
+RUN apk add \
+        build-base \
+        cmake \
+        linux-headers \
+        perl-dev
+
+ENV BORINGSSL_SRC=/usr/src/boringssl
+RUN git clone --depth=1 --branch fips-20190808 https://boringssl.googlesource.com/boringssl ${BORINGSSL_SRC}
+WORKDIR ${BORINGSSL_SRC}
+
+RUN sed -i 's@out \([>=]\) TLS1_2_VERSION@out \1 TLS1_3_VERSION@' ./ssl/ssl_lib.cc
+RUN sed -i 's@ssl->version[ ]*=[ ]*TLS1_2_VERSION@ssl->version = TLS1_3_VERSION@' ./ssl/s3_lib.cc
+RUN sed -i 's@(SSL3_VERSION, TLS1_2_VERSION@(SSL3_VERSION, TLS1_3_VERSION@' ./ssl/ssl_test.cc
+RUN sed -i 's@\$shaext[ ]*=[ ]*0;@\$shaext = 1;@' ./crypto/*/asm/*.pl
+RUN sed -i 's@\$avx[ ]*=[ ]*[0|1];@\$avx = 2;@' ./crypto/*/asm/*.pl
+RUN sed -i 's@\$addx[ ]*=[ ]*0;@\$addx = 1;@' ./crypto/*/asm/*.pl
+
+RUN mkdir -p ./build ./.openssl/lib ./.openssl/include \
+    && ln -sf ../../include/openssl ./.openssl/include/openssl \
+    && touch ./.openssl/include/openssl/ssl.h
+
+RUN cmake -B./build -H. -DCMAKE_BUILD_TYPE=RelWithDebInfo
+RUN make -C./build -j$(getconf _NPROCESSORS_ONLN)
+RUN cp ./build/crypto/libcrypto.a ./build/ssl/libssl.a ./.openssl/lib/
+
+RUN install -d /usr/local/boringssl/include/openssl/ /usr/local/boringssl/lib/
+RUN install ./.openssl/include/openssl/* /usr/local/boringssl/include/openssl/
+RUN install ./.openssl/lib/* /usr/local/boringssl/lib/
+
+#--- build curl with boringssl ---
+FROM ${GO_IMAGE} as curl-builder
+
+
+RUN apk add \
+        autoconf \
+        automake \
+        libtool \
+        pkgconf \
+        brotli-dev \
+        nghttp2-dev \
+        zlib-dev \
+        zstd-dev
+
+ENV CURL_SRC=/usr/src/curl
+RUN git clone --depth=1 --branch curl-7_75_0 https://github.com/curl/curl.git ${CURL_SRC}
+WORKDIR ${CURL_SRC}
+
+COPY --from=boringssl-builder /usr/local/boringssl/ /usr/local/boringssl/
+
+RUN autoreconf -fi
+RUN ./configure \
+        --enable-shared=no \
+        --with-ssl=/usr/local/boringssl \
+        --prefix=/usr/local/curl
+RUN make
+RUN make install
+
+
+#--- build hardened nginx with boringssl ---
+FROM ${GO_IMAGE} as nginx-builder
+
+RUN apk add \
+        brotli-static \
+        bzip2-static \
+        freetype-static \
+        libjpeg-turbo-static \
+        libpng-static \
+        libwebp-static \
+        libxslt-dev \
+        libmaxminddb-static \
+        zlib-static
+
+RUN apk add \
+        brotli-dev \
+        brotli-static \
+        nghttp2-dev \
+        nghttp2-static \
+        zstd-dev \
+        zstd-static
+
+ARG PKG
+ARG SRC
+
+COPY patches/ /patches/
+
+RUN git clone --depth=1 https://${SRC}.git $GOPATH/src/${PKG}
+RUN cp $GOPATH/src/${PKG}/images/nginx/rootfs/patches/* /patches/
+
+COPY --from=boringssl-builder /usr/local/boringssl/ /usr/local/
+COPY --from=curl-builder /usr/local/curl/ /usr/local/
+
+ENV CC=cc
+ENV CXX=c++
+
+COPY scripts/build.sh .
+
+#RUN ./build.sh
+
 #--- create a runtime image ---
 FROM ubi
+
+WORKDIR /
 
 RUN microdnf update -y && rm -rf /var/cache/yum
 RUN microdnf install -y conntrack-tools findutils which
 
-RUN groupadd --system --gid 1001 nginx \
-    && adduser --system -g nginx --no-create-home --home /nonexistent -c "nginx user" --shell /bin/false --uid 1001 nginx
+RUN groupadd --system --gid 101 www-data \
+    && adduser --system -g www-data --no-create-home --home /nonexistent -c "www-data user" --shell /bin/false --uid 101 www-data
 
-COPY --from=nginx-builder /usr/sbin/nginx* /usr/sbin/
-COPY --from=nginx-builder /etc/nginx/ /etc/nginx/
-COPY --from=nginx-builder /usr/share/nginx/ /usr/share/nginx/
-COPY --from=nginx-builder /var/log/nginx/ /var/log/nginx/
+COPY --from=nginx-builder --chown=www-data:www-data /etc/nginx/ /etc/nginx/
+COPY --from=nginx-builder --chown=www-data:www-data /usr/local/nginx/ /usr/local/nginx/
+COPY --from=nginx-builder --chown=www-data:www-data /opt/modsecurity/ /opt/modsecurity/
+COPY --from=nginx-builder --chown=www-data:www-data /var/log/audit/ /var/log/audit/
+COPY --from=nginx-builder --chown=www-data:www-data /var/log/nginx/ /var/log/nginx/
 
 RUN mkdir -p /var/cache/nginx && \
-    chown -R nginx:0 /var/log/nginx/ /var/cache/nginx /usr/share/nginx && \
-    chmod -R g=u /var/log/nginx/ /var/cache/nginx /usr/share/nginx
+    chown -R www-data:0 /var/cache/nginx && \
+    chmod -R g=u /var/cache/nginx
 
-COPY --from=ingress-nginx-builder /usr/local/bin/ /usr/local/bin/
+COPY --from=ingress-nginx-builder --chown=www-data:www-data /usr/local/bin/ /usr/local/bin/
+COPY --from=ingress-nginx-builder --chown=www-data:www-data /go/src/k8s.io/ingress-nginx/rootfs/etc/nginx/ /etc/nginx/
+COPY --from=ingress-nginx-builder --chown=www-data:www-data /go/src/k8s.io/ingress-nginx/images/nginx/rootfs/etc/nginx/geoip/ /etc/nginx/geoip/
+
+RUN ln -s /usr/local/bin/* .
+RUN ln -s /usr/local/nginx/sbin/* /usr/local/bin/
+
+RUN for exec in $(ls /usr/local/bin/nginx*); do \
+        setcap cap_net_bind_service=+ep $exec; \
+        setcap -v cap_net_bind_service=+ep $exec || (echo "setcap for $exec failed" >&2; exit 1); \
+    done
+
+USER www-data
 
 RUN nginx-ingress-controller --version
