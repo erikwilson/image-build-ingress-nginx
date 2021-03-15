@@ -1,26 +1,21 @@
 diff --git a/images/nginx/rootfs/build.sh b/images/nginx/rootfs/build.sh
-index 167485a46..7c55023a1 100755
+index 167485a46..b084bd9e0 100755
 --- a/images/nginx/rootfs/build.sh
 +++ b/images/nginx/rootfs/build.sh
-@@ -17,6 +17,7 @@
+@@ -15,4 +15,5 @@
+ # limitations under the License.
+ 
++set -o xtrace
  set -o errexit
  set -o nounset
- set -o pipefail
-+set -o xtrace
- 
- export NGINX_VERSION=1.19.6
- export NDK_VERSION=0.3.1
-@@ -57,7 +58,7 @@ export LUA_RESTY_REDIS_VERSION=0.29
- export LUA_RESTY_IPMATCHER_VERSION=1a0a1c58fd085b15eedee58de8b5f45c27aff7bc
+@@ -58,5 +59,5 @@ export LUA_RESTY_IPMATCHER_VERSION=1a0a1c58fd085b15eedee58de8b5f45c27aff7bc
  export LUA_RESTY_GLOBAL_THROTTLE_VERSION=0.2.0
  
 -export BUILD_PATH=/tmp/build
 +export BUILD_PATH=/usr/src
  
  ARCH=$(uname -m)
- 
-@@ -78,12 +79,10 @@ get_src()
- # install required packages to build
+@@ -79,10 +80,8 @@ get_src()
  apk add \
    bash \
 -  gcc \
@@ -31,9 +26,7 @@ index 167485a46..7c55023a1 100755
 -  openssl-dev \
    pcre-dev \
    zlib-dev \
-   linux-headers \
-@@ -98,14 +97,11 @@ apk add \
-   curl ca-certificates \
+@@ -99,12 +98,9 @@ apk add \
    patch \
    libaio-dev \
 -  openssl \
@@ -47,9 +40,7 @@ index 167485a46..7c55023a1 100755
 +  git g++ pkgconf flex bison doxygen yajl-dev libtool autoconf libxml2 libxml2-dev \
    python3 \
    libmaxminddb-dev \
-   bc \
-@@ -385,7 +381,8 @@ sed -i '117i AC_SUBST(LUA_CFLAGS)' build/lua.m4
- ./configure \
+@@ -386,5 +382,6 @@ sed -i '117i AC_SUBST(LUA_CFLAGS)' build/lua.m4
    --disable-doxygen-doc \
    --disable-doxygen-html \
 -  --disable-examples
@@ -57,24 +48,19 @@ index 167485a46..7c55023a1 100755
 +  --enable-shared=no
  
  make
- make install
-@@ -485,11 +482,12 @@ CC_OPT="-g -Og -fPIE -fstack-protector-strong \
-   -D_FORTIFY_SOURCE=2 \
-   --param=ssp-buffer-size=4 \
+@@ -487,8 +484,10 @@ CC_OPT="-g -Og -fPIE -fstack-protector-strong \
    -DTCP_FASTOPEN=23 \
--  -fPIC \
+   -fPIC \
 +  -no-pie \
 +  -static \
    -I$HUNTER_INSTALL_DIR/include \
    -Wno-cast-function-type"
  
 -LD_OPT="-fPIE -fPIC -pie -Wl,-z,relro -Wl,-z,now -L$HUNTER_INSTALL_DIR/lib"
-+LD_OPT="-no-pie -static -L$HUNTER_INSTALL_DIR/lib"
++LD_OPT="-fPIC -no-pie -static -L$HUNTER_INSTALL_DIR/lib"
  
  if [[ ${ARCH} != "aarch64" ]]; then
-   WITH_FLAGS+=" --with-file-aio"
-@@ -508,12 +506,12 @@ WITH_MODULES=" \
-   --add-module=$BUILD_PATH/stream-lua-nginx-module-$LUA_STREAM_NGX_VERSION \
+@@ -509,10 +508,10 @@ WITH_MODULES=" \
    --add-module=$BUILD_PATH/lua-upstream-nginx-module-$LUA_UPSTREAM_VERSION \
    --add-module=$BUILD_PATH/nginx_ajp_module-${NGINX_AJP_VERSION} \
 -  --add-dynamic-module=$BUILD_PATH/nginx-http-auth-digest-$NGINX_DIGEST_AUTH \
@@ -91,4 +77,3 @@ index 167485a46..7c55023a1 100755
 +  --add-module=$BUILD_PATH/ngx_brotli"
  
  ./configure \
-   --prefix=/usr/local/nginx \

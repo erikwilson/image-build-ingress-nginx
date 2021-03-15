@@ -1,0 +1,3 @@
+[submodule "src/ingress-nginx"]
+	path = src/ingress-nginx
+	url = https://github.com/kubernetes/ingress-nginx.git

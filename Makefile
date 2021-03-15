@@ -35,8 +35,18 @@ image-build: patches
 patches/nginx-src-dynamic_tls_records.patch:
 	curl -fSL https://raw.githubusercontent.com/nginx-modules/ngx_http_tls_dyn_size/0.5/nginx__dynamic_tls_records_1.17.7%2B.patch -o patches/nginx-src-dynamic_tls_records.patch
 
+.PHONY: src/patches/ingress-nginx.patch
+src/patches/ingress-nginx.patch: src/ingress-nginx/images/nginx/rootfs/build.sh
+	cd src/ingress-nginx && [ -n "$(git status --porcelain --untracked-files=no)" ] && \
+		diff -p -U2 >../patches/ingress-nginx.patch
+
+src/ingress-nginx/images/nginx/rootfs/build.sh:
+	git submodule update
+	cd src/ingress-nginx && patch -p1 <../patches/ingress-nginx.patch
+
 patches: \
-	patches/nginx-src-dynamic_tls_records.patch
+	patches/nginx-src-dynamic_tls_records.patch \
+	src/patches/ingress-nginx.patch
 
 .PHONY: image-push
 image-push:
