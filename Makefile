@@ -37,8 +37,9 @@ patches/nginx-src-dynamic_tls_records.patch:
 
 .PHONY: src/patches/ingress-nginx.patch
 src/patches/ingress-nginx.patch: src/ingress-nginx/images/nginx/rootfs/build.sh
-	cd src/ingress-nginx && [ -n "$(git status --porcelain --untracked-files=no)" ] && \
-		diff -p -U2 >../patches/ingress-nginx.patch
+	if [ -n "$(shell git status --porcelain --untracked-files=no src/ingress-nginx)" ]; then \
+		cd src/ingress-nginx && git diff -p -U2 >../patches/ingress-nginx.patch; \
+	fi
 
 src/ingress-nginx/images/nginx/rootfs/build.sh:
 	git submodule update
