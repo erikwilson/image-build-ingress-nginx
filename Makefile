@@ -19,7 +19,7 @@ $(error TAG needs to end with build metadata: $(BUILD_META))
 endif
 
 .PHONY: image-build
-image-build: patches
+image-build: src patches
 	docker build --target nginx-builder \
 		--pull \
 		--build-arg ARCH=$(ARCH) \
@@ -32,22 +32,24 @@ image-build: patches
 		--tag $(ORG)/hardened-ingress-nginx:$(TAG)-$(ARCH) \
 	.
 
-patches/nginx-src-dynamic_tls_records.patch:
-	curl -fSL https://raw.githubusercontent.com/nginx-modules/ngx_http_tls_dyn_size/0.5/nginx__dynamic_tls_records_1.17.7%2B.patch -o patches/nginx-src-dynamic_tls_records.patch
+patches/nginx/nginx-src-dynamic_tls_records.patch:
+	curl -fSL https://raw.githubusercontent.com/nginx-modules/ngx_http_tls_dyn_size/0.5/nginx__dynamic_tls_records_1.17.7%2B.patch -o patches/nginx/nginx-src-dynamic_tls_records.patch
 
-.PHONY: src/patches/ingress-nginx.patch
-src/patches/ingress-nginx.patch: src/ingress-nginx/images/nginx/rootfs/build.sh
-	if [ -n "$(shell git status --porcelain --untracked-files=no src/ingress-nginx)" ]; then \
-		cd src/ingress-nginx && git diff -p -U2 >../patches/ingress-nginx.patch; \
+.PHONY: patches/${PKG}.patch
+patches/${PKG}.patch: src
+	if [ -n "$(shell git -C ./src/${PKG} status --porcelain --untracked-files=no)" ]; then \
+		git -C ./src/${PKG} diff -p -U2 >./patches/${PKG}.patch; \
+	else \
+		patch -d ./src/${PKG} -p1 <./patches/${PKG}.patch; \
 	fi
 
-src/ingress-nginx/images/nginx/rootfs/build.sh:
+.PHONY: src
+src:
 	git submodule update
-	cd src/ingress-nginx && patch -p1 <../patches/ingress-nginx.patch
 
 patches: \
-	patches/nginx-src-dynamic_tls_records.patch \
-	src/patches/ingress-nginx.patch
+	patches/nginx/nginx-src-dynamic_tls_records.patch \
+	patches/${PKG}.patch
 
 .PHONY: image-push
 image-push:

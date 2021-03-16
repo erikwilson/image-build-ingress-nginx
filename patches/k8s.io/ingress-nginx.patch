@@ -1,5 +1,5 @@
 diff --git a/images/nginx/rootfs/build.sh b/images/nginx/rootfs/build.sh
-index 167485a46..b084bd9e0 100755
+index 167485a46..dd97e95b5 100755
 --- a/images/nginx/rootfs/build.sh
 +++ b/images/nginx/rootfs/build.sh
 @@ -15,4 +15,5 @@
@@ -37,7 +37,7 @@ index 167485a46..b084bd9e0 100755
 -  curl-dev \
    libprotobuf \
 -  git g++ pkgconf flex bison doxygen yajl-dev lmdb-dev libtool autoconf libxml2 libxml2-dev \
-+  git g++ pkgconf flex bison doxygen yajl-dev libtool autoconf libxml2 libxml2-dev \
++  git pkgconf flex bison doxygen yajl-dev libtool autoconf libxml2 libxml2-dev \
    python3 \
    libmaxminddb-dev \
 @@ -386,5 +382,6 @@ sed -i '117i AC_SUBST(LUA_CFLAGS)' build/lua.m4
@@ -48,6 +48,13 @@ index 167485a46..b084bd9e0 100755
 +  --enable-shared=no
  
  make
+@@ -478,5 +475,5 @@ WITH_FLAGS="--with-debug \
+ # "Combining -flto with -g is currently experimental and expected to produce unexpected results."
+ # https://gcc.gnu.org/onlinedocs/gcc/Optimize-Options.html
+-CC_OPT="-g -Og -fPIE -fstack-protector-strong \
++CC_OPT="-g -Og -fstack-protector-strong \
+   -Wformat \
+   -Werror=format-security \
 @@ -487,8 +484,10 @@ CC_OPT="-g -Og -fPIE -fstack-protector-strong \
    -DTCP_FASTOPEN=23 \
    -fPIC \

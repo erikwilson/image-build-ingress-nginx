@@ -43,9 +43,9 @@ RUN cmake -B./build -H. -DCMAKE_BUILD_TYPE=RelWithDebInfo
 RUN make -C./build -j$(getconf _NPROCESSORS_ONLN)
 RUN cp ./build/crypto/libcrypto.a ./build/ssl/libssl.a ./.openssl/lib/
 
-RUN install -d /usr/local/boringssl/include/openssl/ /usr/local/boringssl/lib/
-RUN install ./.openssl/include/openssl/* /usr/local/boringssl/include/openssl/
-RUN install ./.openssl/lib/* /usr/local/boringssl/lib/
+RUN install -d /usr/local/include/openssl/ /usr/local/lib/
+RUN install ./.openssl/include/openssl/* /usr/local/include/openssl/
+RUN install ./.openssl/lib/* /usr/local/lib/
 
 
 #--- build curl with boringssl ---
@@ -66,13 +66,13 @@ ENV CURL_SRC=/usr/src/curl
 RUN git clone --depth=1 --branch ${CURL_VERSION} https://github.com/curl/curl.git ${CURL_SRC}
 WORKDIR ${CURL_SRC}
 
-COPY --from=boringssl-builder /usr/local/boringssl/ /usr/local/boringssl/
+COPY --from=boringssl-builder /usr/local/ /usr/local/boringssl/
 
 RUN autoreconf -fi
 RUN ./configure \
         --enable-shared=no \
         --with-ssl=/usr/local/boringssl \
-        --prefix=/usr/local/curl
+        --prefix=/usr/local
 RUN make
 RUN make install
 
@@ -101,20 +101,13 @@ ARG SRC
 ENV CC=cc
 ENV CXX=c++
 
-COPY --from=boringssl-builder /usr/local/boringssl/ /usr/local/
-COPY --from=curl-builder /usr/local/curl/ /usr/local/
+COPY --from=boringssl-builder /usr/local/ /usr/local/
+COPY --from=curl-builder /usr/local/ /usr/local/
 
-COPY patches/nginx-src-* /patches/
-
-RUN git clone --depth=1 https://${SRC}.git ${GOPATH}/src/${PKG}
+COPY ./patches/nginx/* /patches/
+COPY ./src/${PKG} ${GOPATH}/src/${PKG}
 WORKDIR ${GOPATH}/src/${PKG}
 RUN cp ./images/nginx/rootfs/patches/* /patches/
-
-COPY patches/ingress-nginx-src-* ./patches/
-RUN for PATCH in `ls ./patches/`; do \
-        echo "Patch: $PATCH"; \
-        patch -p1 < ./patches/$PATCH; \
-    done
 
 WORKDIR /usr/src
 RUN ${GOPATH}/src/${PKG}/images/nginx/rootfs/build.sh
