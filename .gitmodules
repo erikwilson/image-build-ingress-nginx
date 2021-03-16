@@ -1,3 +1,4 @@
 [submodule "src/k8s.io/ingress-nginx"]
 	path = src/k8s.io/ingress-nginx
 	url = https://github.com/kubernetes/ingress-nginx.git
+	ignore = dirty
