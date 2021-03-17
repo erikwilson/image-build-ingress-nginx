@@ -20,8 +20,10 @@ endif
 
 .PHONY: image-build
 image-build: src patches
-	docker build --target nginx-builder \
+	docker build --target curl-builder \
 		--pull \
+		--target nginx-builder \
+		--progress plain \
 		--build-arg ARCH=$(ARCH) \
 		--build-arg PKG=$(PKG) \
 		--build-arg SRC=$(SRC) \
@@ -32,23 +34,30 @@ image-build: src patches
 		--tag $(ORG)/hardened-ingress-nginx:$(TAG)-$(ARCH) \
 	.
 
-patches/nginx/nginx-src-dynamic_tls_records.patch:
-	curl -fSL https://raw.githubusercontent.com/nginx-modules/ngx_http_tls_dyn_size/0.5/nginx__dynamic_tls_records_1.17.7%2B.patch -o patches/nginx/nginx-src-dynamic_tls_records.patch
+boring/build.sh:
+	curl -fSL https://raw.githubusercontent.com/golang/go/dev.boringcrypto.go1.16/src/crypto/internal/$@ -o $@
+	chmod a+x $@
+
+boring/goboringcrypto.h:
+	curl -fSL https://raw.githubusercontent.com/golang/go/dev.boringcrypto.go1.16/src/crypto/internal/$@ -o $@
+
+boring: \
+	boring/build.sh \
+	boring/goboringcrypto.h
 
 .PHONY: patches/${PKG}.patch
 patches/${PKG}.patch: src
 	if [ -n "$(shell git -C ./src/${PKG} status --porcelain --untracked-files=no)" ]; then \
-		git -C ./src/${PKG} diff -p -U2 >./patches/${PKG}.patch; \
+		git -C ./src/${PKG} diff -p -U2 > $@; \
 	else \
-		patch -d ./src/${PKG} -p1 <./patches/${PKG}.patch; \
+		patch -d ./src/${PKG} -p1 < $@; \
 	fi
 
 .PHONY: src
-src:
+src: boring
 	git submodule update
 
 patches: \
-	patches/nginx/nginx-src-dynamic_tls_records.patch \
 	patches/${PKG}.patch
 
 .PHONY: image-push

@@ -14,38 +14,40 @@ ARG MINOR
 FROM ${UBI_IMAGE} as ubi
 
 
-#--- boringssl build adapted from https://github.com/nginx-modules/docker-nginx-boringssl ---
-FROM ${GO_IMAGE} as boringssl-builder
+#--- boringssl build adapted from https://github.com/golang/go/blob/dev.boringcrypto.go1.16/src/crypto/internal/boring/Dockerfile ---
+FROM ubuntu:focal as boringssl-builder
 
-RUN apk add \
-        build-base \
-        cmake \
-        linux-headers \
-        perl-dev
+RUN mkdir /boring
+WORKDIR /boring
 
-ARG BORING_VERSION
-ENV BORING_SRC=/usr/src/boringssl
-RUN git clone --depth=1 --branch ${BORING_VERSION} https://boringssl.googlesource.com/boringssl ${BORING_SRC}
-WORKDIR ${BORING_SRC}
+# Following 140sp3678.pdf [0] page 19, install clang 7.0.1, Go 1.12.7, and
+# Ninja 1.9.0, then download and verify BoringSSL.
+#
+# [0]: https://csrc.nist.gov/CSRC/media/projects/cryptographic-module-validation-program/documents/security-policies/140sp3678.pdf
 
-RUN sed -i 's@out \([>=]\) TLS1_2_VERSION@out \1 TLS1_3_VERSION@' ./ssl/ssl_lib.cc
-RUN sed -i 's@ssl->version[ ]*=[ ]*TLS1_2_VERSION@ssl->version = TLS1_3_VERSION@' ./ssl/s3_lib.cc
-RUN sed -i 's@(SSL3_VERSION, TLS1_2_VERSION@(SSL3_VERSION, TLS1_3_VERSION@' ./ssl/ssl_test.cc
-RUN sed -i 's@\$shaext[ ]*=[ ]*0;@\$shaext = 1;@' ./crypto/*/asm/*.pl
-RUN sed -i 's@\$avx[ ]*=[ ]*[0|1];@\$avx = 2;@' ./crypto/*/asm/*.pl
-RUN sed -i 's@\$addx[ ]*=[ ]*0;@\$addx = 1;@' ./crypto/*/asm/*.pl
+RUN apt-get update && \
+        apt-get install --no-install-recommends -y cmake xz-utils wget unzip ca-certificates clang-7
+RUN wget https://github.com/ninja-build/ninja/releases/download/v1.9.0/ninja-linux.zip && \
+        unzip ninja-linux.zip && \
+        rm ninja-linux.zip && \
+        mv ninja /usr/local/bin/
+RUN wget https://golang.org/dl/go1.12.7.linux-amd64.tar.gz && \
+        tar -C /usr/local -xzf go1.12.7.linux-amd64.tar.gz && \
+        rm go1.12.7.linux-amd64.tar.gz && \
+        ln -s /usr/local/go/bin/go /usr/local/bin/
 
-RUN mkdir -p ./build ./.openssl/lib ./.openssl/include \
-    && ln -sf ../../include/openssl ./.openssl/include/openssl \
-    && touch ./.openssl/include/openssl/ssl.h
+RUN wget https://commondatastorage.googleapis.com/chromium-boringssl-fips/boringssl-ae223d6138807a13006342edfeef32e813246b39.tar.xz
+RUN [ "$(sha256sum boringssl-ae223d6138807a13006342edfeef32e813246b39.tar.xz | awk '{print $1}')" = \
+        3b5fdf23274d4179c2077b5e8fa625d9debd7a390aac1d165b7e47234f648bb8 ]
 
-RUN cmake -B./build -H. -DCMAKE_BUILD_TYPE=RelWithDebInfo
-RUN make -C./build -j$(getconf _NPROCESSORS_ONLN)
-RUN cp ./build/crypto/libcrypto.a ./build/ssl/libssl.a ./.openssl/lib/
+ADD boring/goboringcrypto.h /boring/godriver/goboringcrypto.h
+ADD boring/build.sh /boring/build.sh
+RUN ./build.sh
 
-RUN install -d /usr/local/include/openssl/ /usr/local/lib/
-RUN install ./.openssl/include/openssl/* /usr/local/include/openssl/
-RUN install ./.openssl/lib/* /usr/local/lib/
+RUN install -d /usr/local/boringssl/include/openssl/ /usr/local/boringssl/lib/
+RUN install ./boringssl/include/openssl/* /usr/local/boringssl/include/openssl/
+RUN install ./boringssl/build/crypto/libcrypto.a /usr/local/boringssl/lib/
+RUN install ./boringssl/build/ssl/libssl.a /usr/local/boringssl/lib/
 
 
 #--- build curl with boringssl ---
@@ -66,13 +68,13 @@ ENV CURL_SRC=/usr/src/curl
 RUN git clone --depth=1 --branch ${CURL_VERSION} https://github.com/curl/curl.git ${CURL_SRC}
 WORKDIR ${CURL_SRC}
 
-COPY --from=boringssl-builder /usr/local/ /usr/local/boringssl/
+COPY --from=boringssl-builder /usr/local/boringssl/ /usr/local/boringssl/
 
 RUN autoreconf -fi
 RUN ./configure \
         --enable-shared=no \
         --with-ssl=/usr/local/boringssl \
-        --prefix=/usr/local
+        --prefix=/usr/local/curl
 RUN make
 RUN make install
 
@@ -101,8 +103,8 @@ ARG SRC
 ENV CC=cc
 ENV CXX=c++
 
-COPY --from=boringssl-builder /usr/local/ /usr/local/
-COPY --from=curl-builder /usr/local/ /usr/local/
+COPY --from=boringssl-builder /usr/local/boringssl/ /usr/local/
+COPY --from=curl-builder /usr/local/curl/ /usr/local/
 
 COPY ./patches/nginx/* /patches/
 COPY ./src/${PKG} ${GOPATH}/src/${PKG}
