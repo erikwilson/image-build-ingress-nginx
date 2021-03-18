@@ -14,42 +14,6 @@ ARG MINOR
 FROM ${UBI_IMAGE} as ubi
 
 
-#--- boringssl build adapted from https://github.com/golang/go/blob/dev.boringcrypto.go1.16/src/crypto/internal/boring/Dockerfile ---
-FROM ubuntu:focal as boringssl-builder
-
-RUN mkdir /boring
-WORKDIR /boring
-
-# Following 140sp3678.pdf [0] page 19, install clang 7.0.1, Go 1.12.7, and
-# Ninja 1.9.0, then download and verify BoringSSL.
-#
-# [0]: https://csrc.nist.gov/CSRC/media/projects/cryptographic-module-validation-program/documents/security-policies/140sp3678.pdf
-
-RUN apt-get update && \
-        apt-get install --no-install-recommends -y cmake xz-utils wget unzip ca-certificates clang-7
-RUN wget https://github.com/ninja-build/ninja/releases/download/v1.9.0/ninja-linux.zip && \
-        unzip ninja-linux.zip && \
-        rm ninja-linux.zip && \
-        mv ninja /usr/local/bin/
-RUN wget https://golang.org/dl/go1.12.7.linux-amd64.tar.gz && \
-        tar -C /usr/local -xzf go1.12.7.linux-amd64.tar.gz && \
-        rm go1.12.7.linux-amd64.tar.gz && \
-        ln -s /usr/local/go/bin/go /usr/local/bin/
-
-RUN wget https://commondatastorage.googleapis.com/chromium-boringssl-fips/boringssl-ae223d6138807a13006342edfeef32e813246b39.tar.xz
-RUN [ "$(sha256sum boringssl-ae223d6138807a13006342edfeef32e813246b39.tar.xz | awk '{print $1}')" = \
-        3b5fdf23274d4179c2077b5e8fa625d9debd7a390aac1d165b7e47234f648bb8 ]
-
-ADD boring/goboringcrypto.h /boring/godriver/goboringcrypto.h
-ADD boring/build.sh /boring/build.sh
-RUN ./build.sh
-
-RUN install -d /usr/local/boringssl/include/openssl/ /usr/local/boringssl/lib/
-RUN install ./boringssl/include/openssl/* /usr/local/boringssl/include/openssl/
-RUN install ./boringssl/build/crypto/libcrypto.a /usr/local/boringssl/lib/
-RUN install ./boringssl/build/ssl/libssl.a /usr/local/boringssl/lib/
-
-
 #--- build curl with boringssl ---
 FROM ${GO_IMAGE} as curl-builder
 
@@ -68,7 +32,7 @@ ENV CURL_SRC=/usr/src/curl
 RUN git clone --depth=1 --branch ${CURL_VERSION} https://github.com/curl/curl.git ${CURL_SRC}
 WORKDIR ${CURL_SRC}
 
-COPY --from=boringssl-builder /usr/local/boringssl/ /usr/local/boringssl/
+COPY ./artifacts/boringssl/ /usr/local/boringssl/
 
 RUN autoreconf -fi
 RUN ./configure \
@@ -103,7 +67,7 @@ ARG SRC
 ENV CC=cc
 ENV CXX=c++
 
-COPY --from=boringssl-builder /usr/local/boringssl/ /usr/local/
+COPY ./artifacts/boringssl/ /usr/local/
 COPY --from=curl-builder /usr/local/curl/ /usr/local/
 
 COPY ./patches/nginx/* /patches/
@@ -111,8 +75,9 @@ COPY ./src/${PKG} ${GOPATH}/src/${PKG}
 WORKDIR ${GOPATH}/src/${PKG}
 RUN cp ./images/nginx/rootfs/patches/* /patches/
 
-WORKDIR /usr/src
-RUN ${GOPATH}/src/${PKG}/images/nginx/rootfs/build.sh
+WORKDIR /tmp
+RUN cp ${GOPATH}/src/${PKG}/images/nginx/rootfs/build.sh .
+RUN ./build.sh
 
 
 #--- build hardened ingress-nginx with goboring ---

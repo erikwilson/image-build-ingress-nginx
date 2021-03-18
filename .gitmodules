@@ -2,3 +2,8 @@
 	path = src/k8s.io/ingress-nginx
 	url = https://github.com/kubernetes/ingress-nginx.git
 	ignore = dirty
+[submodule "src/go.googlesource.com/go-boring"]
+	path = src/go.googlesource.com/go-boring
+	url = https://go.googlesource.com/go
+	branch = dev.boringcrypto.go1.16
+	ignore = dirty

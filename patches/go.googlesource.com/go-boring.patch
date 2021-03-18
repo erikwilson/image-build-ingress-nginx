@@ -1,0 +1,16 @@
+diff --git a/src/crypto/internal/boring/Dockerfile b/src/crypto/internal/boring/Dockerfile
+index 811a6dc379..f09788367c 100644
+--- a/src/crypto/internal/boring/Dockerfile
++++ b/src/crypto/internal/boring/Dockerfile
+@@ -40,3 +40,10 @@ ADD goboringcrypto.h /boring/godriver/goboringcrypto.h
+ ADD build.sh /boring/build.sh
+ 
+-ENTRYPOINT ["/boring/build.sh"]
++RUN /boring/build.sh
++
++RUN install -d /usr/local/boringssl/include/openssl/ /usr/local/boringssl/lib/
++RUN install ./boringssl/include/openssl/* /usr/local/boringssl/include/openssl/
++RUN install ./boringssl/build/crypto/libcrypto.a /usr/local/boringssl/lib/
++RUN install ./boringssl/build/ssl/libssl.a /usr/local/boringssl/lib/
++
++ENTRYPOINT ["/usr/bin/true"]

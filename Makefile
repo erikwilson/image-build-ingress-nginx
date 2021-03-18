@@ -10,6 +10,8 @@ PKG ?= k8s.io/ingress-nginx
 SRC ?= github.com/kubernetes/ingress-nginx
 TAG ?= v0.35.0$(BUILD_META)
 
+SUBMODULES ?= $(shell git submodule--helper list | cut -f2)
+
 ifneq ($(DRONE_TAG),)
 TAG := $(DRONE_TAG)
 endif
@@ -19,8 +21,8 @@ $(error TAG needs to end with build metadata: $(BUILD_META))
 endif
 
 .PHONY: image-build
-image-build: src patches
-	docker build --target curl-builder \
+image-build: src artifacts/boringssl
+	docker build --target nginx-builder \
 		--pull \
 		--target nginx-builder \
 		--progress plain \
@@ -34,31 +36,31 @@ image-build: src patches
 		--tag $(ORG)/hardened-ingress-nginx:$(TAG)-$(ARCH) \
 	.
 
-boring/build.sh:
-	curl -fSL https://raw.githubusercontent.com/golang/go/dev.boringcrypto.go1.16/src/crypto/internal/$@ -o $@
-	chmod a+x $@
+artifacts:
+	mkdir artifacts
 
-boring/goboringcrypto.h:
-	curl -fSL https://raw.githubusercontent.com/golang/go/dev.boringcrypto.go1.16/src/crypto/internal/$@ -o $@
+artifacts/boringssl: artifacts
+	docker build --tag boringssl${BUILD_META} src/go.googlesource.com/go-boring/src/crypto/internal/boring/
+	docker create --name boringssl${BUILD_META} boringssl${BUILD_META}
+	docker cp boringssl${BUILD_META}:/usr/local/boringssl/ $@
+	docker rm boringssl${BUILD_META}
 
-boring: \
-	boring/build.sh \
-	boring/goboringcrypto.h
+.PHONY: git-submodule-update
+git-submodule-update:
+	git submodule update
 
-.PHONY: patches/${PKG}.patch
-patches/${PKG}.patch: src
-	if [ -n "$(shell git -C ./src/${PKG} status --porcelain --untracked-files=no)" ]; then \
-		git -C ./src/${PKG} diff -p -U2 > $@; \
+.PHONY: ${SUBMODULES}
+${SUBMODULES}: git-submodule-update
+	@set -o xtrace; \
+	PKG=$(@:src/%=%); \
+	if [ -n "$$(git -C $@ status --porcelain --untracked-files=no)" ]; then \
+		git -C $@ diff -p -U2 > patches/$${PKG}.patch; \
 	else \
-		patch -d ./src/${PKG} -p1 < $@; \
+		patch -d $@ -p1 < patches/$${PKG}.patch; \
 	fi
 
 .PHONY: src
-src: boring
-	git submodule update
-
-patches: \
-	patches/${PKG}.patch
+src: ${SUBMODULES}
 
 .PHONY: image-push
 image-push:
