@@ -21,10 +21,9 @@ $(error TAG needs to end with build metadata: $(BUILD_META))
 endif
 
 .PHONY: image-build
-image-build: src artifacts/boringssl
+image-build: src artifacts/boringssl.tar.gz
 	docker build --target nginx-builder \
 		--pull \
-		--target nginx-builder \
 		--progress plain \
 		--build-arg ARCH=$(ARCH) \
 		--build-arg PKG=$(PKG) \
@@ -39,10 +38,11 @@ image-build: src artifacts/boringssl
 artifacts:
 	mkdir artifacts
 
-artifacts/boringssl: artifacts
-	docker build --tag boringssl${BUILD_META} src/go.googlesource.com/go-boring/src/crypto/internal/boring/
-	docker create --name boringssl${BUILD_META} boringssl${BUILD_META}
-	docker cp boringssl${BUILD_META}:/usr/local/boringssl/ $@
+artifacts/boringssl.tar.gz: artifacts
+	docker rm -f boringssl${BUILD_META}
+	docker build --tag boringssl${BUILD_META}:latest src/go.googlesource.com/go-boring/src/crypto/internal/boring/
+	docker create --name boringssl${BUILD_META} boringssl${BUILD_META}:latest
+	docker cp boringssl${BUILD_META}:/usr/local/boringssl/. - | gzip - >$@
 	docker rm boringssl${BUILD_META}
 
 .PHONY: git-submodule-update

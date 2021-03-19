@@ -1,7 +1,6 @@
 ARG UBI_IMAGE=registry.access.redhat.com/ubi7/ubi-minimal:latest
 ARG GO_IMAGE=rancher/hardened-build-base:v1.15.8b5
 
-ARG BORING_VERSION=fips-20190808
 ARG CURL_VERSION=curl-7_75_0
 
 ARG TAG=v0.35.0
@@ -32,7 +31,7 @@ ENV CURL_SRC=/usr/src/curl
 RUN git clone --depth=1 --branch ${CURL_VERSION} https://github.com/curl/curl.git ${CURL_SRC}
 WORKDIR ${CURL_SRC}
 
-COPY ./artifacts/boringssl/ /usr/local/boringssl/
+ADD ./artifacts/boringssl.tar.gz /usr/local/boringssl/
 
 RUN autoreconf -fi
 RUN ./configure \
@@ -67,7 +66,7 @@ ARG SRC
 ENV CC=cc
 ENV CXX=c++
 
-COPY ./artifacts/boringssl/ /usr/local/
+ADD ./artifacts/boringssl.tar.gz /usr/local/
 COPY --from=curl-builder /usr/local/curl/ /usr/local/
 
 COPY ./patches/nginx/* /patches/
@@ -119,6 +118,11 @@ RUN microdnf install -y conntrack-tools findutils which
 RUN groupadd --system --gid 101 www-data \
     && adduser --system -g www-data --no-create-home --home /nonexistent -c "www-data user" --shell /bin/false --uid 101 www-data
 
+ENV PATH=$PATH:/usr/local/luajit/bin:/usr/local/nginx/sbin:/usr/local/nginx/bin
+
+ENV LUA_PATH="/usr/local/share/luajit-2.1.0-beta3/?.lua;/usr/local/share/lua/5.1/?.lua;/usr/local/lib/lua/?.lua;;"
+ENV LUA_CPATH="/usr/local/lib/lua/?/?.so;/usr/local/lib/lua/?.so;;"
+
 COPY --from=nginx-builder --chown=www-data:www-data /etc/nginx/ /etc/nginx/
 COPY --from=nginx-builder --chown=www-data:www-data /usr/local/nginx/ /usr/local/nginx/
 COPY --from=nginx-builder --chown=www-data:www-data /opt/modsecurity/ /opt/modsecurity/
@@ -126,6 +130,25 @@ COPY --from=nginx-builder --chown=www-data:www-data /var/log/audit/ /var/log/aud
 COPY --from=nginx-builder --chown=www-data:www-data /var/log/nginx/ /var/log/nginx/
 COPY --from=nginx-builder --chown=www-data:www-data /go/src/k8s.io/ingress-nginx/rootfs/etc/nginx/ /etc/nginx/
 COPY --from=nginx-builder --chown=www-data:www-data /go/src/k8s.io/ingress-nginx/images/nginx/rootfs/etc/nginx/geoip/ /etc/nginx/geoip/
+
+RUN bash -eu -c ' \
+  writeDirs=( \
+    /var/log \
+    /var/log/nginx \
+    /var/lib/nginx/body \
+    /var/lib/nginx/fastcgi \
+    /var/lib/nginx/proxy \
+    /var/lib/nginx/scgi \
+    /var/lib/nginx/uwsgi \
+    /var/log/audit \
+    /etc/ingress-controller \
+    /etc/ingress-controller/ssl \
+    /etc/ingress-controller/auth \
+  ); \
+  for dir in "${writeDirs[@]}"; do \
+    mkdir -p ${dir}; \
+    chown -R www-data.www-data ${dir}; \
+  done'
 
 RUN mkdir -p /var/cache/nginx && \
     chown -R www-data:0 /var/cache/nginx && \
@@ -136,10 +159,10 @@ COPY --from=ingress-nginx-builder --chown=www-data:www-data /usr/local/bin/ /usr
 RUN ln -s /usr/local/bin/* .
 RUN ln -s /usr/local/nginx/sbin/* /usr/local/bin/
 
-RUN for exec in $(ls /usr/local/bin/nginx*); do \
-        setcap cap_net_bind_service=+ep $exec; \
-        setcap -v cap_net_bind_service=+ep $exec || (echo "setcap for $exec failed" >&2; exit 1); \
-    done
+RUN setcap    cap_net_bind_service=+ep /nginx-ingress-controller
+RUN setcap -v cap_net_bind_service=+ep /nginx-ingress-controller
+RUN setcap    cap_net_bind_service=+ep /usr/local/nginx/sbin/nginx
+RUN setcap -v cap_net_bind_service=+ep /usr/local/nginx/sbin/nginx
 
 USER www-data
 
