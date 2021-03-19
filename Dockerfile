@@ -66,6 +66,8 @@ ARG SRC
 ENV CC=cc
 ENV CXX=c++
 
+RUN rm -rf /usr/local/*
+
 ADD ./artifacts/boringssl.tar.gz /usr/local/
 COPY --from=curl-builder /usr/local/curl/ /usr/local/
 
@@ -89,6 +91,9 @@ ENV BUILD_TAG=controller-${TAG}
 RUN git clone --depth=1 --branch ${BUILD_TAG} https://${SRC}.git ${GOPATH}/src/${PKG}
 WORKDIR ${GOPATH}/src/${PKG}
 
+RUN apk add dumb-init
+RUN file /usr/bin/dumb-init | grep 'statically linked'
+
 RUN \
     export COMMIT=$(git rev-parse --short HEAD) && \
     export REPO_INFO=$(git config --get remote.origin.url) && \
@@ -108,9 +113,9 @@ RUN install -s bin/* /usr/local/bin
 
 
 #--- create a runtime image ---
-FROM ubi
+FROM ubi as build
 
-WORKDIR /
+WORKDIR /etc/nginx
 
 RUN microdnf update -y && rm -rf /var/cache/yum
 RUN microdnf install -y conntrack-tools findutils which
@@ -125,6 +130,7 @@ ENV LUA_CPATH="/usr/local/lib/lua/?/?.so;/usr/local/lib/lua/?.so;;"
 
 COPY --from=nginx-builder --chown=www-data:www-data /etc/nginx/ /etc/nginx/
 COPY --from=nginx-builder --chown=www-data:www-data /usr/local/nginx/ /usr/local/nginx/
+COPY --from=nginx-builder --chown=www-data:www-data /usr/local/lib/lua/ /usr/local/lib/lua/
 COPY --from=nginx-builder --chown=www-data:www-data /opt/modsecurity/ /opt/modsecurity/
 COPY --from=nginx-builder --chown=www-data:www-data /var/log/audit/ /var/log/audit/
 COPY --from=nginx-builder --chown=www-data:www-data /var/log/nginx/ /var/log/nginx/
@@ -133,14 +139,11 @@ COPY --from=nginx-builder --chown=www-data:www-data /go/src/k8s.io/ingress-nginx
 
 RUN bash -eu -c ' \
   writeDirs=( \
-    /var/log \
-    /var/log/nginx \
     /var/lib/nginx/body \
     /var/lib/nginx/fastcgi \
     /var/lib/nginx/proxy \
     /var/lib/nginx/scgi \
     /var/lib/nginx/uwsgi \
-    /var/log/audit \
     /etc/ingress-controller \
     /etc/ingress-controller/ssl \
     /etc/ingress-controller/auth \
@@ -154,10 +157,8 @@ RUN mkdir -p /var/cache/nginx && \
     chown -R www-data:0 /var/cache/nginx && \
     chmod -R g=u /var/cache/nginx
 
-COPY --from=ingress-nginx-builder --chown=www-data:www-data /usr/local/bin/ /usr/local/bin/
-
-RUN ln -s /usr/local/bin/* .
-RUN ln -s /usr/local/nginx/sbin/* /usr/local/bin/
+COPY --from=ingress-nginx-builder --chown=www-data:www-data /usr/local/bin/ /
+COPY --from=ingress-nginx-builder /usr/bin/dumb-init /usr/local/bin/dumb-init
 
 RUN setcap    cap_net_bind_service=+ep /nginx-ingress-controller
 RUN setcap -v cap_net_bind_service=+ep /nginx-ingress-controller
@@ -166,4 +167,10 @@ RUN setcap -v cap_net_bind_service=+ep /usr/local/nginx/sbin/nginx
 
 USER www-data
 
-RUN nginx-ingress-controller --version
+RUN /nginx-ingress-controller --version
+
+EXPOSE 80 443
+
+ENTRYPOINT ["/usr/local/bin/dumb-init", "--"]
+
+CMD ["/nginx-ingress-controller"]

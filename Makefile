@@ -9,8 +9,9 @@ ORG ?= rancher
 PKG ?= k8s.io/ingress-nginx
 SRC ?= github.com/kubernetes/ingress-nginx
 TAG ?= v0.35.0$(BUILD_META)
+IMAGE_NAME ?= hardened-ingress-nginx
 
-SUBMODULES ?= $(shell git submodule--helper list | cut -f2)
+SUBMODULES = $(shell git submodule--helper list | cut -f2)
 
 ifneq ($(DRONE_TAG),)
 TAG := $(DRONE_TAG)
@@ -20,10 +21,12 @@ ifeq (,$(filter %$(BUILD_META),$(TAG)))
 $(error TAG needs to end with build metadata: $(BUILD_META))
 endif
 
-.PHONY: image-build
-image-build: src artifacts/boringssl.tar.gz
+DEFAULT: image-build
+
+image-%: src artifacts/boringssl.tar.gz
 	docker build --target nginx-builder \
 		--pull \
+		--target $* \
 		--progress plain \
 		--build-arg ARCH=$(ARCH) \
 		--build-arg PKG=$(PKG) \
@@ -31,8 +34,8 @@ image-build: src artifacts/boringssl.tar.gz
 		--build-arg TAG=$(TAG:$(BUILD_META)=) \
 		--build-arg MAJOR=$(shell ./scripts/semver-parse.sh ${TAG} major) \
 		--build-arg MINOR=$(shell ./scripts/semver-parse.sh ${TAG} minor) \
-		--tag $(ORG)/hardened-ingress-nginx:$(TAG) \
-		--tag $(ORG)/hardened-ingress-nginx:$(TAG)-$(ARCH) \
+		--tag $(ORG)/$(IMAGE_NAME):$(patsubst build-,,$*-)$(TAG) \
+		--tag $(ORG)/$(IMAGE_NAME):$(patsubst build-,,$*-)$(TAG)-$(ARCH) \
 	.
 
 artifacts:
@@ -64,16 +67,16 @@ src: ${SUBMODULES}
 
 .PHONY: image-push
 image-push:
-	docker push $(ORG)/hardened-ingress-nginx:$(TAG)-$(ARCH)
+	docker push $(ORG)/$(IMAGE_NAME):$(TAG)-$(ARCH)
 
 .PHONY: image-manifest
 image-manifest:
 	DOCKER_CLI_EXPERIMENTAL=enabled docker manifest create --amend \
-		$(ORG)/hardened-ingress-nginx:$(TAG) \
-		$(ORG)/hardened-ingress-nginx:$(TAG)-$(ARCH)
+		$(ORG)/$(IMAGE_NAME):$(TAG) \
+		$(ORG)/$(IMAGE_NAME):$(TAG)-$(ARCH)
 	DOCKER_CLI_EXPERIMENTAL=enabled docker manifest push \
-		$(ORG)/hardened-ingress-nginx:$(TAG)
+		$(ORG)/$(IMAGE_NAME):$(TAG)
 
 .PHONY: image-scan
 image-scan:
-	trivy --severity $(SEVERITIES) --no-progress --ignore-unfixed $(ORG)/hardened-ingress-nginx:$(TAG)
+	trivy --severity $(SEVERITIES) --no-progress --ignore-unfixed $(ORG)/$(IMAGE_NAME):$(TAG)
