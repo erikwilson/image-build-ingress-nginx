@@ -10,6 +10,9 @@ ARG SRC=github.com/kubernetes/ingress-nginx
 ARG MAJOR
 ARG MINOR
 
+ARG LUA_PATH="/usr/local/share/luajit-2.1.0-beta3/?.lua;/usr/local/share/lua/5.1/?.lua;/usr/local/lib/lua/?.lua;;"
+ARG LUA_CPATH="/usr/local/lib/lua/?/?.so;/usr/local/lib/lua/?.so;;"
+
 FROM ${UBI_IMAGE} as ubi
 
 
@@ -43,42 +46,81 @@ RUN make install
 
 
 #--- build hardened nginx with boringssl ---
-FROM ${GO_IMAGE} as nginx-builder
+FROM centos:7 as nginx-builder
 
-RUN apk add \
-        patch \
-        brotli-dev \
-        brotli-static \
-        bzip2-static \
-        libxslt-dev \
-        libmaxminddb-static \
-        nghttp2-static \
-        zlib-static \
-        zstd-static
+RUN groupadd --system --gid 101 www-data \
+    && adduser --system -g www-data --no-create-home --home /nonexistent -c "www-data user" --shell /bin/false --uid 101 www-data
 
-RUN deluser svn
-RUN delgroup svnusers
-RUN delgroup docker
+ARG CMAKEDIR=/opt/cmake
+RUN mkdir -p ${CMAKEDIR}
+RUN curl -sfL https://github.com/Kitware/CMake/releases/download/v3.20.0/cmake-3.20.0-linux-x86_64.tar.gz | tar --strip-components=1 -C ${CMAKEDIR} -xzf -
 
 ARG PKG
 ARG SRC
 
-ENV CC=cc
-ENV CXX=c++
+ENV PATH=$PATH:/usr/local/nginx/sbin:${CMAKEDIR}/bin
+
+ARG LUA_PATH
+ARG LUA_CPATH
+ENV LUA_PATH=${LUA_PATH}
+ENV LUA_CPATH=${LUA_CPATH}
+
+# install required packages to build
+RUN yum install -y conntrack-tools findutils which centos-release-scl
+RUN yum install -y devtoolset-7-gcc devtoolset-7-gcc-c++
+RUN yum install -y \
+  bash \
+  make \
+  automake \
+  pcre-devel \
+  zlib-devel \
+  kernel-headers \
+  libxslt-devel \
+  gd-devel \
+  geoip-devel \
+  perl-devel \
+  libedit-devel \
+  mercurial \
+  findutils \
+  curl ca-certificates \
+  patch \
+  libaio-devel \
+  util-linux \
+  wget \
+  protobuf-devel \
+  git flex bison doxygen yajl-devel libtool autoconf libxml2 libxml2-devel \
+  python3 \
+  libmaxminddb-devel \
+  bc \
+  unzip \
+  dos2unix \
+  libyaml-devel \
+  coreutils
 
 RUN rm -rf /usr/local/*
 
 ADD ./artifacts/boringssl.tar.gz /usr/local/
-COPY --from=curl-builder /usr/local/curl/ /usr/local/
+COPY --from=curl-builder /usr/local/curl/lib/ /usr/local/lib/
+COPY --from=curl-builder /usr/local/curl/include/ /usr/local/include/
 
-COPY ./patches/nginx/* /patches/
-COPY ./src/${PKG} ${GOPATH}/src/${PKG}
-WORKDIR ${GOPATH}/src/${PKG}
-RUN cp ./images/nginx/rootfs/patches/* /patches/
+COPY ./src/${PKG} /go/src/${PKG}
 
 WORKDIR /tmp
-RUN cp ${GOPATH}/src/${PKG}/images/nginx/rootfs/build.sh .
-RUN ./build.sh
+RUN ln -s /go/src/${PKG}/images/nginx/rootfs/patches/ /patches
+RUN cp /go/src/${PKG}/images/nginx/rootfs/build.sh .
+RUN scl enable devtoolset-7 ./build.sh
+
+RUN bash -eu -c ' \
+  writeDirs=( \
+    /var/lib/nginx/body \
+    /var/lib/nginx/fastcgi \
+    /var/lib/nginx/proxy \
+    /var/lib/nginx/scgi \
+    /var/lib/nginx/uwsgi \
+  ); \
+  for dir in "${writeDirs[@]}"; do \
+    mkdir -p ${dir}; \
+  done'
 
 
 #--- build hardened ingress-nginx with goboring ---
@@ -111,6 +153,16 @@ RUN go-assert-boring.sh bin/*
 # install (with strip) to /usr/local/bin
 RUN install -s bin/* /usr/local/bin
 
+RUN bash -eu -c ' \
+  writeDirs=( \
+    /etc/ingress-controller \
+    /etc/ingress-controller/ssl \
+    /etc/ingress-controller/auth \
+  ); \
+  for dir in "${writeDirs[@]}"; do \
+    mkdir -p ${dir}; \
+  done'
+
 
 #--- create a runtime image ---
 FROM ubi as build
@@ -118,46 +170,35 @@ FROM ubi as build
 WORKDIR /etc/nginx
 
 RUN microdnf update -y && rm -rf /var/cache/yum
-RUN microdnf install -y conntrack-tools findutils which
+RUN microdnf install -y conntrack-tools findutils which geoip
 
 RUN groupadd --system --gid 101 www-data \
     && adduser --system -g www-data --no-create-home --home /nonexistent -c "www-data user" --shell /bin/false --uid 101 www-data
 
-ENV PATH=$PATH:/usr/local/luajit/bin:/usr/local/nginx/sbin:/usr/local/nginx/bin
+ENV PATH=$PATH:/usr/local/nginx/sbin
 
-ENV LUA_PATH="/usr/local/share/luajit-2.1.0-beta3/?.lua;/usr/local/share/lua/5.1/?.lua;/usr/local/lib/lua/?.lua;;"
-ENV LUA_CPATH="/usr/local/lib/lua/?/?.so;/usr/local/lib/lua/?.so;;"
+ARG LUA_PATH
+ARG LUA_CPATH
+ENV LUA_PATH=${LUA_PATH}
+ENV LUA_CPATH=${LUA_CPATH}
 
 COPY --from=nginx-builder --chown=www-data:www-data /etc/nginx/ /etc/nginx/
 COPY --from=nginx-builder --chown=www-data:www-data /usr/local/nginx/ /usr/local/nginx/
-COPY --from=nginx-builder --chown=www-data:www-data /usr/local/lib/lua/ /usr/local/lib/lua/
+COPY --from=nginx-builder --chown=www-data:www-data /usr/local/bin/ /usr/local/bin/
+COPY --from=nginx-builder --chown=www-data:www-data /usr/local/lib/ /usr/local/lib/
 COPY --from=nginx-builder --chown=www-data:www-data /opt/modsecurity/ /opt/modsecurity/
 COPY --from=nginx-builder --chown=www-data:www-data /var/log/audit/ /var/log/audit/
 COPY --from=nginx-builder --chown=www-data:www-data /var/log/nginx/ /var/log/nginx/
+COPY --from=nginx-builder --chown=www-data:www-data /var/lib/nginx/ /var/lib/nginx/
 COPY --from=nginx-builder --chown=www-data:www-data /go/src/k8s.io/ingress-nginx/rootfs/etc/nginx/ /etc/nginx/
 COPY --from=nginx-builder --chown=www-data:www-data /go/src/k8s.io/ingress-nginx/images/nginx/rootfs/etc/nginx/geoip/ /etc/nginx/geoip/
-
-RUN bash -eu -c ' \
-  writeDirs=( \
-    /var/lib/nginx/body \
-    /var/lib/nginx/fastcgi \
-    /var/lib/nginx/proxy \
-    /var/lib/nginx/scgi \
-    /var/lib/nginx/uwsgi \
-    /etc/ingress-controller \
-    /etc/ingress-controller/ssl \
-    /etc/ingress-controller/auth \
-  ); \
-  for dir in "${writeDirs[@]}"; do \
-    mkdir -p ${dir}; \
-    chown -R www-data.www-data ${dir}; \
-  done'
 
 RUN mkdir -p /var/cache/nginx && \
     chown -R www-data:0 /var/cache/nginx && \
     chmod -R g=u /var/cache/nginx
 
 COPY --from=ingress-nginx-builder --chown=www-data:www-data /usr/local/bin/ /
+COPY --from=ingress-nginx-builder --chown=www-data:www-data /etc/ingress-controller/ /etc/ingress-controller/
 COPY --from=ingress-nginx-builder /usr/bin/dumb-init /usr/local/bin/dumb-init
 
 RUN setcap    cap_net_bind_service=+ep /nginx-ingress-controller

@@ -1,5 +1,5 @@
 diff --git a/images/nginx/rootfs/build.sh b/images/nginx/rootfs/build.sh
-index 167485a46..b38ce289e 100755
+index 167485a46..9b8e4c6d9 100755
 --- a/images/nginx/rootfs/build.sh
 +++ b/images/nginx/rootfs/build.sh
 @@ -15,4 +15,5 @@
@@ -8,76 +8,66 @@ index 167485a46..b38ce289e 100755
 +set -o xtrace
  set -o errexit
  set -o nounset
-@@ -79,10 +80,8 @@ get_src()
- apk add \
-   bash \
--  gcc \
-   clang \
-   libc-dev \
-   make \
-   automake \
--  openssl-dev \
-   pcre-dev \
-   zlib-dev \
-@@ -99,12 +98,9 @@ apk add \
-   patch \
-   libaio-dev \
--  openssl \
-   cmake \
-   util-linux \
--  lmdb-tools \
-   wget \
--  curl-dev \
-   libprotobuf \
--  git g++ pkgconf flex bison doxygen yajl-dev lmdb-dev libtool autoconf libxml2 libxml2-dev \
-+  git pkgconf flex bison doxygen yajl-dev libtool autoconf libxml2 libxml2-dev \
-   python3 \
-   libmaxminddb-dev \
-@@ -386,5 +382,6 @@ sed -i '117i AC_SUBST(LUA_CFLAGS)' build/lua.m4
-   --disable-doxygen-doc \
-   --disable-doxygen-html \
--  --disable-examples
-+  --disable-examples \
-+  --enable-shared=no
+@@ -76,43 +77,4 @@ get_src()
+ }
  
- make
-@@ -478,5 +475,5 @@ WITH_FLAGS="--with-debug \
- # "Combining -flto with -g is currently experimental and expected to produce unexpected results."
- # https://gcc.gnu.org/onlinedocs/gcc/Optimize-Options.html
--CC_OPT="-g -Og -fPIE -fstack-protector-strong \
-+CC_OPT="-g -Og -fstack-protector-strong \
-   -Wformat \
-   -Werror=format-security \
-@@ -487,8 +484,10 @@ CC_OPT="-g -Og -fPIE -fstack-protector-strong \
-   -DTCP_FASTOPEN=23 \
-   -fPIC \
-+  -no-pie \
-+  -static \
-   -I$HUNTER_INSTALL_DIR/include \
+-# install required packages to build
+-apk add \
+-  bash \
+-  gcc \
+-  clang \
+-  libc-dev \
+-  make \
+-  automake \
+-  openssl-dev \
+-  pcre-dev \
+-  zlib-dev \
+-  linux-headers \
+-  libxslt-dev \
+-  gd-dev \
+-  geoip-dev \
+-  perl-dev \
+-  libedit-dev \
+-  mercurial \
+-  alpine-sdk \
+-  findutils \
+-  curl ca-certificates \
+-  patch \
+-  libaio-dev \
+-  openssl \
+-  cmake \
+-  util-linux \
+-  lmdb-tools \
+-  wget \
+-  curl-dev \
+-  libprotobuf \
+-  git g++ pkgconf flex bison doxygen yajl-dev lmdb-dev libtool autoconf libxml2 libxml2-dev \
+-  python3 \
+-  libmaxminddb-dev \
+-  bc \
+-  unzip \
+-  dos2unix \
+-  yaml-cpp \
+-  coreutils
+-
+ mkdir -p /etc/nginx
+ 
+@@ -490,5 +452,5 @@ CC_OPT="-g -Og -fPIE -fstack-protector-strong \
    -Wno-cast-function-type"
  
 -LD_OPT="-fPIE -fPIC -pie -Wl,-z,relro -Wl,-z,now -L$HUNTER_INSTALL_DIR/lib"
-+LD_OPT="-fPIC -no-pie -static -L$HUNTER_INSTALL_DIR/lib"
++LD_OPT="-fPIE -fPIC -pie -Wl,-z,relro -Wl,-z,now -L$HUNTER_INSTALL_DIR/lib -Wl,-rpath,$LUAJIT_LIB"
  
  if [[ ${ARCH} != "aarch64" ]]; then
-@@ -509,10 +508,10 @@ WITH_MODULES=" \
-   --add-module=$BUILD_PATH/lua-upstream-nginx-module-$LUA_UPSTREAM_VERSION \
-   --add-module=$BUILD_PATH/nginx_ajp_module-${NGINX_AJP_VERSION} \
--  --add-dynamic-module=$BUILD_PATH/nginx-http-auth-digest-$NGINX_DIGEST_AUTH \
--  --add-dynamic-module=$BUILD_PATH/nginx-influxdb-module-$NGINX_INFLUXDB_VERSION \
--  --add-dynamic-module=$BUILD_PATH/nginx-opentracing-$NGINX_OPENTRACING_VERSION/opentracing \
--  --add-dynamic-module=$BUILD_PATH/ModSecurity-nginx-$MODSECURITY_VERSION \
--  --add-dynamic-module=$BUILD_PATH/ngx_http_geoip2_module-${GEOIP2_VERSION} \
--  --add-dynamic-module=$BUILD_PATH/ngx_brotli"
-+  --add-module=$BUILD_PATH/nginx-http-auth-digest-$NGINX_DIGEST_AUTH \
-+  --add-module=$BUILD_PATH/nginx-influxdb-module-$NGINX_INFLUXDB_VERSION \
-+  --add-module=$BUILD_PATH/nginx-opentracing-$NGINX_OPENTRACING_VERSION/opentracing \
-+  --add-module=$BUILD_PATH/ModSecurity-nginx-$MODSECURITY_VERSION \
-+  --add-module=$BUILD_PATH/ngx_http_geoip2_module-${GEOIP2_VERSION} \
-+  --add-module=$BUILD_PATH/ngx_brotli"
+@@ -618,7 +580,4 @@ writeDirs=( \
+ );
  
- ./configure \
-@@ -628,5 +627,2 @@ done
+-addgroup -Sg 101 www-data
+-adduser -S -D -H -u 101 -h /usr/local/nginx -s /sbin/nologin -G www-data -g www-data www-data
+-
+ for dir in "${writeDirs[@]}"; do
+   mkdir -p ${dir};
+@@ -628,5 +587,2 @@ done
  rm -rf /etc/nginx/owasp-modsecurity-crs/.git
  rm -rf /etc/nginx/owasp-modsecurity-crs/util/regression-tests
 -
