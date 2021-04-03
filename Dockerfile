@@ -1,5 +1,6 @@
 ARG UBI_IMAGE=registry.access.redhat.com/ubi7/ubi-minimal:latest
 ARG GO_IMAGE=rancher/hardened-build-base:v1.15.8b5
+ARG ALPINE_IMAGE=alpine:latest
 
 ARG CURL_VERSION=curl-7_75_0
 
@@ -15,34 +16,46 @@ ARG LUA_CPATH="/usr/local/lib/lua/?/?.so;/usr/local/lib/lua/?.so;;"
 
 FROM ${UBI_IMAGE} as ubi
 
+FROM ${ALPINE_IMAGE} as alpine
 
 #--- build curl with boringssl ---
-FROM ${GO_IMAGE} as curl-builder
+FROM alpine as curl-builder
 
 RUN apk add \
+        alpine-sdk \
         autoconf \
         automake \
+        clang \
         libtool \
-        pkgconf \
-        brotli-dev \
-        nghttp2-dev \
-        zlib-dev \
-        zstd-dev
+        zlib-dev zlib-static
 
 ARG CURL_VERSION
 ENV CURL_SRC=/usr/src/curl
 RUN git clone --depth=1 --branch ${CURL_VERSION} https://github.com/curl/curl.git ${CURL_SRC}
 WORKDIR ${CURL_SRC}
 
-ADD ./artifacts/boringssl.tar.gz /usr/local/boringssl/
+ADD ./artifacts/boringssl.tar.gz /opt/local/
+
+ENV CC="clang"
+ENV LDFLAGS="-static"
+ENV PKG_CONFIG="pkg-config --static"
 
 RUN autoreconf -fi
 RUN ./configure \
         --enable-shared=no \
-        --with-ssl=/usr/local/boringssl \
-        --prefix=/usr/local/curl
-RUN make
+        --with-ssl=/opt/local \
+        --prefix=/opt/curl
+RUN make -j V=1 curl_LDFLAGS=-all-static
 RUN make install
+
+
+#--- other nginx static build dependencies ---
+FROM alpine as extra-static-libs
+
+RUN apk add \
+  libmaxminddb-dev libmaxminddb-static \
+  protobuf-dev \
+  yajl-dev
 
 
 #--- build hardened nginx with boringssl ---
@@ -65,50 +78,71 @@ ARG LUA_CPATH
 ENV LUA_PATH=${LUA_PATH}
 ENV LUA_CPATH=${LUA_CPATH}
 
+ARG DEVTOOLSET=devtoolset-9
+
 # install required packages to build
 RUN yum install -y conntrack-tools findutils which centos-release-scl
-RUN yum install -y devtoolset-7-gcc devtoolset-7-gcc-c++
+RUN yum install -y ${DEVTOOLSET}-gcc ${DEVTOOLSET}-gcc-c++
 RUN yum install -y \
   bash \
   make \
   automake \
-  pcre-devel \
-  zlib-devel \
   kernel-headers \
-  libxslt-devel \
-  gd-devel \
-  geoip-devel \
   perl-devel \
-  libedit-devel \
   mercurial \
   findutils \
   curl ca-certificates \
   patch \
-  libaio-devel \
   util-linux \
   wget \
-  protobuf-devel \
-  git flex bison doxygen yajl-devel libtool autoconf libxml2 libxml2-devel \
+  git flex bison doxygen libtool autoconf \
   python3 \
-  libmaxminddb-devel \
   bc \
   unzip \
   dos2unix \
   libyaml-devel \
   coreutils
+RUN yum install -y \
+  gd-devel \
+  geoip-devel \
+  pcre-devel \
+  libaio-devel \
+  libxml2-devel \
+  libxslt-devel \
+  zlib-devel
 
 RUN rm -rf /usr/local/*
 
-ADD ./artifacts/boringssl.tar.gz /usr/local/
-COPY --from=curl-builder /usr/local/curl/lib/ /usr/local/lib/
-COPY --from=curl-builder /usr/local/curl/include/ /usr/local/include/
-
 COPY ./src/${PKG} /go/src/${PKG}
+
+ARG LOCAL=/opt/local
+COPY --from=extra-static-libs /usr/include/ ${LOCAL}/include/
+COPY --from=extra-static-libs /usr/lib/*.a ${LOCAL}/lib/
+COPY --from=extra-static-libs /usr/lib/pkgconfig/ ${LOCAL}/lib/pkgconfig/
+
+WORKDIR ${LOCAL}/lib
+RUN mv libyajl_s.a libyajl.a
+RUN for pattern in \
+        "s|^prefix=.*|prefix=${LOCAL}|"  \
+        's|^exec_prefix=.*|exec_prefix=\${prefix}|' \
+        's|^libdir=.*|libdir=\${prefix}/lib|' \
+        's|/usr/include|\${prefix}/include|'; do \
+                for pc in ./pkgconfig/*.pc; do sed -e "$pattern" -i $pc; done \
+    done
+
+ARG CURL=/opt/curl
+COPY --from=curl-builder /opt/curl/ ${CURL}/
+ADD ./artifacts/boringssl.tar.gz ${LOCAL}/
+
+ENV CPATH="${LOCAL}/include:${CURL}/include"
+ENV LIBRARY_PATH="${LOCAL}/lib:${CURL}/lib"
+ENV PKG_CONFIG_PATH="${LOCAL}/lib/pkgconfig:${CURL}/lib/pkgconfig"
+ENV LIBS="-pthread"
 
 WORKDIR /tmp
 RUN ln -s /go/src/${PKG}/images/nginx/rootfs/patches/ /patches
 RUN cp /go/src/${PKG}/images/nginx/rootfs/build.sh .
-RUN scl enable devtoolset-7 ./build.sh
+RUN scl enable ${DEVTOOLSET} ./build.sh
 
 RUN bash -eu -c ' \
   writeDirs=( \
@@ -170,7 +204,8 @@ FROM ubi as build
 WORKDIR /etc/nginx
 
 RUN microdnf update -y && rm -rf /var/cache/yum
-RUN microdnf install -y conntrack-tools findutils which geoip
+RUN microdnf install -y geoip libaio libedit libmaxminddb libxml2 libxslt libyaml yajl zlib
+RUN microdnf install -y conntrack-tools findutils which
 
 RUN groupadd --system --gid 101 www-data \
     && adduser --system -g www-data --no-create-home --home /nonexistent -c "www-data user" --shell /bin/false --uid 101 www-data
@@ -183,9 +218,8 @@ ENV LUA_PATH=${LUA_PATH}
 ENV LUA_CPATH=${LUA_CPATH}
 
 COPY --from=nginx-builder --chown=www-data:www-data /etc/nginx/ /etc/nginx/
-COPY --from=nginx-builder --chown=www-data:www-data /usr/local/nginx/ /usr/local/nginx/
-COPY --from=nginx-builder --chown=www-data:www-data /usr/local/bin/ /usr/local/bin/
-COPY --from=nginx-builder --chown=www-data:www-data /usr/local/lib/ /usr/local/lib/
+#COPY --from=nginx-builder --chown=www-data:www-data /usr/local/nginx/ /usr/local/nginx/
+COPY --from=nginx-builder --chown=www-data:www-data /usr/local/ /usr/local/
 COPY --from=nginx-builder --chown=www-data:www-data /opt/modsecurity/ /opt/modsecurity/
 COPY --from=nginx-builder --chown=www-data:www-data /var/log/audit/ /var/log/audit/
 COPY --from=nginx-builder --chown=www-data:www-data /var/log/nginx/ /var/log/nginx/

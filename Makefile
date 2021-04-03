@@ -24,7 +24,7 @@ endif
 DEFAULT: image-build
 
 image-%: src artifacts/boringssl.tar.gz
-	docker build --target nginx-builder \
+	docker build \
 		--pull \
 		--target $* \
 		--progress plain \
