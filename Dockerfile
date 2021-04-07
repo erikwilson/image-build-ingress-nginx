@@ -1,5 +1,6 @@
-ARG UBI_IMAGE=registry.access.redhat.com/ubi7/ubi-minimal:latest
 ARG GO_IMAGE=rancher/hardened-build-base:v1.15.8b5
+ARG UBI_IMAGE=registry.access.redhat.com/ubi7/ubi-minimal:latest
+ARG CENTOS_IMAGE=centos:7
 ARG ALPINE_IMAGE=alpine:latest
 
 ARG CURL_VERSION=curl-7_75_0
@@ -14,10 +15,21 @@ ARG MINOR
 ARG LUA_PATH="/usr/local/share/luajit-2.1.0-beta3/?.lua;/usr/local/share/lua/5.1/?.lua;/usr/local/lib/lua/?.lua;;"
 ARG LUA_CPATH="/usr/local/lib/lua/?/?.so;/usr/local/lib/lua/?.so;;"
 
+ARG LOCAL=/opt/local
+ARG CURL=/opt/curl
+
+#------------------------------------------------------------------------------
+
+FROM ${GO_IMAGE} as go
+
 FROM ${UBI_IMAGE} as ubi
+
+FROM ${CENTOS_IMAGE} as centos
 
 FROM ${ALPINE_IMAGE} as alpine
 
+
+#------------------------------------------------------------------------------
 #--- build curl with boringssl ---
 FROM alpine as curl-builder
 
@@ -29,12 +41,14 @@ RUN apk add \
         libtool \
         zlib-dev zlib-static
 
+ARG LOCAL
+ARG CURL
 ARG CURL_VERSION
 ENV CURL_SRC=/usr/src/curl
 RUN git clone --depth=1 --branch ${CURL_VERSION} https://github.com/curl/curl.git ${CURL_SRC}
 WORKDIR ${CURL_SRC}
 
-ADD ./artifacts/boringssl.tar.gz /opt/local/
+ADD ./artifacts/boringssl.tar.gz ${LOCAL}/
 
 ENV CC="clang"
 ENV LDFLAGS="-static"
@@ -43,12 +57,13 @@ ENV PKG_CONFIG="pkg-config --static"
 RUN autoreconf -fi
 RUN ./configure \
         --enable-shared=no \
-        --with-ssl=/opt/local \
-        --prefix=/opt/curl
+        --with-ssl=${LOCAL} \
+        --prefix=${CURL}
 RUN make -j V=1 curl_LDFLAGS=-all-static
 RUN make install
 
 
+#------------------------------------------------------------------------------
 #--- other nginx static build dependencies ---
 FROM alpine as extra-static-libs
 
@@ -57,9 +72,31 @@ RUN apk add \
   protobuf-dev \
   yajl-dev
 
+ARG LOCAL
 
+WORKDIR ${LOCAL}
+
+RUN cp -r /usr/include .
+
+WORKDIR ${LOCAL}/lib
+
+RUN cp /usr/lib/*.a .
+RUN mv libyajl_s.a libyajl.a
+
+RUN cp -r /usr/lib/pkgconfig .
+RUN rm pkgconfig/zlib.pc
+RUN for pattern in \
+        "s|^prefix=.*|prefix=${LOCAL}|"  \
+        's|^exec_prefix=.*|exec_prefix=\${prefix}|' \
+        's|^libdir=.*|libdir=\${prefix}/lib|' \
+        's|/usr/include|\${prefix}/include|'; do \
+                for pc in ./pkgconfig/*.pc; do sed -e "$pattern" -i $pc; done \
+    done
+
+
+#------------------------------------------------------------------------------
 #--- build hardened nginx with boringssl ---
-FROM centos:7 as nginx-builder
+FROM centos as nginx-builder
 
 RUN groupadd --system --gid 101 www-data \
     && adduser --system -g www-data --no-create-home --home /nonexistent -c "www-data user" --shell /bin/false --uid 101 www-data
@@ -110,29 +147,21 @@ RUN yum install -y \
   libxml2-devel \
   libxslt-devel \
   zlib-devel
+# RUN yum install -y \
+#   libmaxminddb-devel \
+#   protobuf-devel \
+#   yajl-devel
 
 RUN rm -rf /usr/local/*
 
 COPY ./src/${PKG} /go/src/${PKG}
 
-ARG LOCAL=/opt/local
-COPY --from=extra-static-libs /usr/include/ ${LOCAL}/include/
-COPY --from=extra-static-libs /usr/lib/*.a ${LOCAL}/lib/
-COPY --from=extra-static-libs /usr/lib/pkgconfig/ ${LOCAL}/lib/pkgconfig/
-
-WORKDIR ${LOCAL}/lib
-RUN mv libyajl_s.a libyajl.a
-RUN for pattern in \
-        "s|^prefix=.*|prefix=${LOCAL}|"  \
-        's|^exec_prefix=.*|exec_prefix=\${prefix}|' \
-        's|^libdir=.*|libdir=\${prefix}/lib|' \
-        's|/usr/include|\${prefix}/include|'; do \
-                for pc in ./pkgconfig/*.pc; do sed -e "$pattern" -i $pc; done \
-    done
-
-ARG CURL=/opt/curl
-COPY --from=curl-builder /opt/curl/ ${CURL}/
+ARG LOCAL
 ADD ./artifacts/boringssl.tar.gz ${LOCAL}/
+COPY --from=extra-static-libs ${LOCAL}/ ${LOCAL}/
+
+ARG CURL
+COPY --from=curl-builder ${CURL} ${CURL}/
 
 ENV CPATH="${LOCAL}/include:${CURL}/include"
 ENV LIBRARY_PATH="${LOCAL}/lib:${CURL}/lib"
@@ -157,8 +186,9 @@ RUN bash -eu -c ' \
   done'
 
 
+#------------------------------------------------------------------------------
 #--- build hardened ingress-nginx with goboring ---
-FROM ${GO_IMAGE} as ingress-nginx-builder
+FROM go as ingress-nginx-builder
 # setup the build
 ARG TAG
 ARG PKG
@@ -198,14 +228,14 @@ RUN bash -eu -c ' \
   done'
 
 
+#------------------------------------------------------------------------------
 #--- create a runtime image ---
 FROM ubi as build
 
 WORKDIR /etc/nginx
 
 RUN microdnf update -y && rm -rf /var/cache/yum
-RUN microdnf install -y geoip libaio libedit libmaxminddb libxml2 libxslt libyaml yajl zlib
-RUN microdnf install -y conntrack-tools findutils which
+RUN microdnf install -y conntrack-tools findutils which gd geoip pcre libaio libxml2 libxslt zlib
 
 RUN groupadd --system --gid 101 www-data \
     && adduser --system -g www-data --no-create-home --home /nonexistent -c "www-data user" --shell /bin/false --uid 101 www-data
