@@ -1,5 +1,5 @@
 diff --git a/images/nginx/rootfs/build.sh b/images/nginx/rootfs/build.sh
-index 167485a46..9b8e4c6d9 100755
+index a03f3416f..a2d9b85c8 100755
 --- a/images/nginx/rootfs/build.sh
 +++ b/images/nginx/rootfs/build.sh
 @@ -15,4 +15,5 @@
@@ -8,68 +8,30 @@ index 167485a46..9b8e4c6d9 100755
 +set -o xtrace
  set -o errexit
  set -o nounset
-@@ -76,43 +77,4 @@ get_src()
- }
+@@ -59,4 +60,19 @@ export BUILD_PATH=/tmp/build
+ ARCH=$(uname -m)
  
--# install required packages to build
--apk add \
--  bash \
--  gcc \
--  clang \
--  libc-dev \
--  make \
--  automake \
--  openssl-dev \
--  pcre-dev \
--  zlib-dev \
--  linux-headers \
--  libxslt-dev \
--  gd-dev \
--  geoip-dev \
--  perl-dev \
--  libedit-dev \
--  mercurial \
--  alpine-sdk \
--  findutils \
--  curl ca-certificates \
--  patch \
--  libaio-dev \
--  openssl \
--  cmake \
--  util-linux \
--  lmdb-tools \
--  wget \
--  curl-dev \
--  libprotobuf \
--  git g++ pkgconf flex bison doxygen yajl-dev lmdb-dev libtool autoconf libxml2 libxml2-dev \
--  python3 \
--  libmaxminddb-dev \
--  bc \
--  unzip \
--  dos2unix \
--  yaml-cpp \
--  coreutils
--
- mkdir -p /etc/nginx
++apk()
++{
++  echo DISABLED apk >&2
++}
++
++addgroup()
++{
++  echo DISABLED addgroup >&2
++}
++
++adduser()
++{
++  echo DISABLED adduser >&2
++}
++
+ get_src()
+ {
+@@ -490,4 +506,6 @@ WITH_MODULES="--add-module=$BUILD_PATH/ngx_devel_kit-$NDK_VERSION \
+   --add-module=$BUILD_PATH/ngx_brotli"
  
-@@ -490,5 +452,5 @@ CC_OPT="-g -Og -fPIE -fstack-protector-strong \
-   -Wno-cast-function-type"
- 
--LD_OPT="-fPIE -fPIC -pie -Wl,-z,relro -Wl,-z,now -L$HUNTER_INSTALL_DIR/lib"
-+LD_OPT="-fPIE -fPIC -pie -Wl,-z,relro -Wl,-z,now -L$HUNTER_INSTALL_DIR/lib -Wl,-rpath,$LUAJIT_LIB"
- 
- if [[ ${ARCH} != "aarch64" ]]; then
-@@ -618,7 +580,4 @@ writeDirs=( \
- );
- 
--addgroup -Sg 101 www-data
--adduser -S -D -H -u 101 -h /usr/local/nginx -s /sbin/nologin -G www-data -g www-data www-data
--
- for dir in "${writeDirs[@]}"; do
-   mkdir -p ${dir};
-@@ -628,5 +587,2 @@ done
- rm -rf /etc/nginx/owasp-modsecurity-crs/.git
- rm -rf /etc/nginx/owasp-modsecurity-crs/util/regression-tests
--
--# remove .a files
--find /usr/local -name "*.a" -print | xargs /bin/rm
++LD_OPT+=" -Wl,-rpath,$LUAJIT_LIB"
++
+ ./configure \
+   --prefix=/usr/local/nginx \

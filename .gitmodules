@@ -1,6 +1,7 @@
 [submodule "src/k8s.io/ingress-nginx"]
 	path = src/k8s.io/ingress-nginx
 	url = https://github.com/kubernetes/ingress-nginx.git
+	branch = controller-v0.35.0
 	ignore = dirty
 [submodule "src/go.googlesource.com/go-boring"]
 	path = src/go.googlesource.com/go-boring

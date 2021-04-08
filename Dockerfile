@@ -1,7 +1,7 @@
 ARG GO_IMAGE=rancher/hardened-build-base:v1.15.8b5
 ARG UBI_IMAGE=registry.access.redhat.com/ubi7/ubi-minimal:latest
 ARG CENTOS_IMAGE=centos:7
-ARG ALPINE_IMAGE=alpine:latest
+ARG ALPINE_IMAGE=alpine:3.13.4
 
 ARG CURL_VERSION=curl-7_75_0
 
@@ -171,6 +171,7 @@ ENV LIBS="-pthread"
 WORKDIR /tmp
 RUN ln -s /go/src/${PKG}/images/nginx/rootfs/patches/ /patches
 RUN cp /go/src/${PKG}/images/nginx/rootfs/build.sh .
+
 RUN scl enable ${DEVTOOLSET} ./build.sh
 
 RUN bash -eu -c ' \
