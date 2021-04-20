@@ -1,12 +1,23 @@
 diff --git a/src/crypto/internal/boring/Dockerfile b/src/crypto/internal/boring/Dockerfile
-index 811a6dc379..f09788367c 100644
+index 811a6dc379..8314d0188a 100644
 --- a/src/crypto/internal/boring/Dockerfile
 +++ b/src/crypto/internal/boring/Dockerfile
-@@ -40,3 +40,10 @@ ADD goboringcrypto.h /boring/godriver/goboringcrypto.h
+@@ -17,5 +17,5 @@ RUN mkdir /boring
+ WORKDIR /boring
+ 
+-# Following 140sp3678.pdf [0] page 19, install clang 7.0.1, Go 1.12.7, and
++# Following 140sp3678.pdf [0] page 19, install clang 7.0.1 (verify after build), Go 1.12.7, and
+ # Ninja 1.9.0, then download and verify BoringSSL.
+ #
+@@ -40,3 +40,14 @@ ADD goboringcrypto.h /boring/godriver/goboringcrypto.h
  ADD build.sh /boring/build.sh
  
 -ENTRYPOINT ["/boring/build.sh"]
++# run build, verify clang version, & install
++
 +RUN /boring/build.sh
++
++RUN clang --version | grep '^clang version 7\.0\.1-'
 +
 +RUN install -d /usr/local/boringssl/include/openssl/ /usr/local/boringssl/lib/
 +RUN install ./boringssl/include/openssl/* /usr/local/boringssl/include/openssl/

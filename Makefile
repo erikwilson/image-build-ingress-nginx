@@ -41,12 +41,11 @@ image-%: src artifacts/boringssl.tar.gz
 artifacts:
 	mkdir artifacts
 
-artifacts/boringssl.tar.gz: artifacts
+artifacts/boringssl.tar.gz: artifacts src/go.googlesource.com/go-boring
 	docker rm -f boringssl${BUILD_META}
 	docker build --tag boringssl${BUILD_META}:latest src/go.googlesource.com/go-boring/src/crypto/internal/boring/
 	docker create --name boringssl${BUILD_META} boringssl${BUILD_META}:latest
 	docker cp boringssl${BUILD_META}:/usr/local/boringssl/. - | gzip - >$@
-	docker rm boringssl${BUILD_META}
 
 .PHONY: git-submodule-update
 git-submodule-update:
